@@ -1,0 +1,68 @@
+import { NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+
+const EVO_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080'
+const EVO_KEY = process.env.EVOLUTION_API_KEY || ''
+
+export async function POST() {
+  const ahora = new Date()
+  const pendientes = await (prisma as any).publicacion.findMany({
+    where: {
+      activa: true,
+      proximoEnvio: { lte: ahora }
+    }
+  })
+
+  let enviados = 0
+  for (const pub of pendientes) {
+    const agentes = JSON.parse(pub.agentes || '[]') as string[]
+    const canales = JSON.parse(pub.canales || '[]') as string[]
+
+    for (const agente of agentes) {
+      if (canales.includes('whatsapp')) {
+        try {
+          let statusJidList: string[] = []
+          try {
+            const cr = await fetch(`${EVO_URL}/chat/findContacts/${agente}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': EVO_KEY },
+              body: JSON.stringify({ where: {} })
+            })
+            const contacts = await cr.json()
+            statusJidList = (Array.isArray(contacts) ? contacts : [])
+              .filter((c: any) => c.remoteJid && !c.isGroup)
+              .map((c: any) => c.remoteJid.includes('@s.whatsapp.net') ? c.remoteJid : c.remoteJid.replace('@lid', '@s.whatsapp.net'))
+              .slice(0, 500)
+          } catch {}
+          if (statusJidList.length === 0) statusJidList = ['573100000000@s.whatsapp.net']
+
+          await fetch(`${EVO_URL}/message/sendStatus/${agente}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': EVO_KEY },
+            body: JSON.stringify({
+              type: 'image',
+              content: pub.imagenUrl,
+              caption: pub.caption || '',
+              statusJidList,
+              backgroundColor: '#000000'
+            })
+          })
+          enviados++
+        } catch(e) { console.log('Error enviando estado:', e) }
+      }
+    }
+
+    // Calcular próximo envío
+    const horas = pub.frecuencia === '12h' ? 12 : 24
+    const proximo = new Date(ahora.getTime() + horas * 3600000)
+    await (prisma as any).publicacion.update({
+      where: { id: pub.id },
+      data: {
+        enviados: pub.enviados + 1,
+        proximoEnvio: proximo
+      }
+    })
+  }
+
+  return NextResponse.json({ ok: true, enviados })
+}

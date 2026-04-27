@@ -1,0 +1,353 @@
+'use client'
+import { useSession } from 'next-auth/react'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+
+const PASOS = [
+  { id: 1, label: 'Validar nombre de empresa' },
+  { id: 2, label: 'Configurando base de datos' },
+  { id: 3, label: 'Configurando canal de mensajería' },
+  { id: 4, label: 'Actualizar bot (index.js)' },
+  { id: 5, label: 'Crear carpetas de media' },
+  { id: 6, label: 'Crear usuario en el panel' },
+  { id: 7, label: 'Rebuild del bot' },
+]
+const PLANES = [
+  { id: 'basico', label: 'Básico', bots: 1 },
+  { id: 'pro', label: 'Pro', bots: 2 },
+  { id: 'business', label: 'Business', bots: 3 },
+]
+type EstadoPaso = 'pendiente' | 'cargando' | 'ok' | 'error'
+
+function diasRestantes(fin: string | null) {
+  if (!fin) return null
+  return Math.ceil((new Date(fin).getTime() - new Date().getTime()) / (1000*60*60*24))
+}
+
+export default function EmpresasPage() {
+  const { data: session } = useSession()
+  const router = useRouter()
+  const user = session?.user as any
+  const [empresas, setEmpresas] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [modal, setModal] = useState(false)
+  const [planModal, setPlanModal] = useState<any>(null)
+  const [form, setForm] = useState({ name: '', numero: '', plan: 'basico' })
+  const [planForm, setPlanForm] = useState({ plan: 'basico', periodicidad: 'mensual' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [progreso, setProgreso] = useState(false)
+  const [pasos, setPasos] = useState<{ id: number; label: string; estado: EstadoPaso; error?: string }[]>([])
+  const [resultado, setResultado] = useState<any>(null)
+
+  useEffect(() => {
+    if (user?.role !== 'admin') { router.push('/dashboard'); return }
+    fetchEmpresas()
+  }, [user])
+
+  async function fetchEmpresas() {
+    const res = await fetch('/api/empresas')
+    const data = await res.json()
+    setEmpresas(Array.isArray(data) ? data : [])
+    setLoading(false)
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true); setError(''); setModal(false); setProgreso(true); setResultado(null)
+    setPasos(PASOS.map(p => ({ ...p, estado: 'pendiente' as EstadoPaso })))
+    const actualizar = (id: number, estado: EstadoPaso, errorMsg?: string) =>
+      setPasos(prev => prev.map(p => p.id === id ? { ...p, estado, error: errorMsg } : p))
+    actualizar(1, 'cargando')
+    const timers = [
+      setTimeout(() => { actualizar(1,'ok'); actualizar(2,'cargando') }, 600),
+      setTimeout(() => { actualizar(2,'ok'); actualizar(3,'cargando') }, 2500),
+      setTimeout(() => { actualizar(3,'ok'); actualizar(4,'cargando') }, 4500),
+      setTimeout(() => { actualizar(4,'ok'); actualizar(5,'cargando') }, 6000),
+      setTimeout(() => { actualizar(5,'ok'); actualizar(6,'cargando') }, 7000),
+      setTimeout(() => { actualizar(6,'ok'); actualizar(7,'cargando') }, 8000),
+    ]
+    try {
+      const res = await fetch('/api/onboarding', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      timers.forEach(clearTimeout)
+      if (data.ok) {
+        setPasos(PASOS.map(p => ({ ...p, estado: 'ok' })))
+        setResultado(data.data); fetchEmpresas()
+      } else {
+        const okCount = (data.steps||[]).filter((s:string)=>s.startsWith('✅')).length
+        setPasos(prev => prev.map((p,i) => i < okCount ? {...p,estado:'ok'} : i === okCount ? {...p,estado:'error',error:data.error} : p))
+        setError(data.error||'Error')
+      }
+    } catch(err:any) { timers.forEach(clearTimeout); setError(err.message) }
+    setSaving(false)
+  }
+
+  async function handlePlanSave() {
+    if (!planModal) return
+    setSaving(true)
+    const res = await fetch('/api/empresas/'+planModal.id, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan: planForm.plan, periodicidad: planForm.periodicidad }),
+    })
+    if (res.ok) { setPlanModal(null); fetchEmpresas() }
+    setSaving(false)
+  }
+
+  const porcentaje = Math.round((pasos.filter(p=>p.estado==='ok').length/PASOS.length)*100)
+  const hayError = pasos.some(p=>p.estado==='error')
+
+  return (
+    <div className="p-8">
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Empresas</h1>
+          <p className="text-zinc-400 mt-1">Gestiona empresas, planes y vigencias</p>
+        </div>
+        <button onClick={() => { setModal(true); setError(''); setForm({name:'',numero:'',plan:'basico'}) }}
+          className="bg-emerald-500 hover:bg-emerald-400 text-white font-semibold px-4 py-2.5 rounded-xl text-sm">
+          + Nueva empresa
+        </button>
+      </div>
+
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+        {loading ? <div className="p-6 text-zinc-500 text-sm">Cargando...</div>
+        : empresas.length === 0 ? <div className="p-6 text-zinc-500 text-sm">No hay empresas</div>
+        : (
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-zinc-800">
+                {['Empresa','Plan','Vigencia','Estado','Acciones'].map(h => (
+                  <th key={h} className="text-left text-zinc-400 text-xs font-medium px-6 py-4">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {empresas.map(e => {
+                const dias = diasRestantes(e.planFin)
+                const vencido = dias !== null && dias <= 0
+                const porVencer = dias !== null && dias > 0 && dias <= 10
+                const sinPlan = !e.planFin
+                const pct = e.planInicio && e.planFin ? Math.min(100,Math.max(0,Math.round(
+                  (new Date().getTime()-new Date(e.planInicio).getTime()) /
+                  (new Date(e.planFin).getTime()-new Date(e.planInicio).getTime())*100
+                ))) : 0
+                return (
+                  <tr key={e.id} className="border-b border-zinc-800 last:border-0 hover:bg-zinc-800/50">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center justify-center text-emerald-400 font-bold text-sm">
+                          {e.name[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="text-white text-sm font-medium">{e.name}</div>
+                          <div className="text-zinc-500 text-xs">{e.email}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`text-xs px-2.5 py-1 rounded-lg font-medium ${
+                        e.plan==='business' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                        e.plan==='pro' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                        'bg-zinc-800 text-zinc-400'}`}>
+                        {e.plan==='business'?'Business':e.plan==='pro'?'Pro':'Básico'}
+                      </span>
+                      {e.periodicidad && <div className="text-zinc-600 text-xs mt-1">{e.periodicidad}</div>}
+                    </td>
+                    <td className="px-6 py-4">
+                      {sinPlan ? <span className="text-zinc-600 text-xs">Sin asignar</span> : (
+                        <div className="space-y-1.5">
+                          <div className="text-zinc-400 text-xs">
+                            {new Date(e.planInicio).toLocaleDateString('es-CO')} → {new Date(e.planFin).toLocaleDateString('es-CO')}
+                          </div>
+                          <div className="w-32 bg-zinc-800 rounded-full h-1.5">
+                            <div className={`h-1.5 rounded-full ${vencido?'bg-red-500':porVencer?'bg-amber-500':'bg-emerald-500'}`}
+                              style={{width:`${pct}%`}} />
+                          </div>
+                          <div className={`text-xs font-medium ${vencido?'text-red-400':porVencer?'text-amber-400':'text-zinc-500'}`}>
+                            {vencido ? '⛔ Vencido' : porVencer ? `⚠️ Vence en ${dias} días` : `${dias} días restantes`}
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${e.planActivo&&!vencido?'bg-emerald-400':'bg-red-500'}`} />
+                        <span className={`text-xs ${e.planActivo&&!vencido?'text-emerald-400':'text-red-400'}`}>
+                          {e.planActivo&&!vencido?'Activo':'Inactivo'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <button onClick={() => { setPlanModal(e); setPlanForm({plan:e.plan,periodicidad:e.periodicidad||'mensual'}) }}
+                        className="text-xs bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded-lg transition-colors">
+                        {sinPlan ? '+ Asignar plan' : '↺ Renovar'}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {modal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-md">
+            <h3 className="text-white font-semibold text-lg mb-1">Nueva empresa</h3>
+            <p className="text-zinc-500 text-xs mb-5">El sistema generará el email y contraseña automáticamente.</p>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div>
+                <label className="text-zinc-400 text-sm mb-1.5 block">Nombre</label>
+                <input value={form.name} onChange={e=>setForm({...form,name:e.target.value.replace(/\s/g,'')})}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500"
+                  placeholder="Ej: MiEmpresa" required />
+                {form.name && <div className="mt-1 text-zinc-500 text-xs">📧 {form.name.toLowerCase()}@tuagentx.com</div>}
+              </div>
+              <div>
+                <label className="text-zinc-400 text-sm mb-1.5 block">Número WhatsApp</label>
+                <input value={form.numero} onChange={e=>setForm({...form,numero:e.target.value})}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500"
+                  placeholder="573001234567" required />
+              </div>
+              <div>
+                <label className="text-zinc-400 text-sm mb-2 block">Plan</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {PLANES.map(p => (
+                    <button key={p.id} type="button" onClick={()=>setForm({...form,plan:p.id})}
+                      className={`p-3 rounded-xl border text-center transition-all ${form.plan===p.id?'bg-emerald-500/10 border-emerald-500/40 text-emerald-400':'bg-zinc-800 border-zinc-700 text-zinc-500'}`}>
+                      <div className="font-semibold text-sm">{p.label}</div>
+                      <div className="text-xs opacity-70">{p.bots} bot{p.bots>1?'s':''}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {error && <div className="text-red-400 text-sm">{error}</div>}
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={()=>setModal(false)}
+                  className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-2.5 rounded-xl text-sm">Cancelar</button>
+                <button type="submit" disabled={saving}
+                  className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl text-sm">
+                  Crear empresa</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {planModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-md">
+            <h3 className="text-white font-semibold text-lg mb-1">{planModal.planFin?'↺ Renovar plan':'+ Asignar plan'}</h3>
+            <p className="text-zinc-500 text-xs mb-5">{planModal.name}</p>
+            <div className="space-y-4">
+              <div>
+                <label className="text-zinc-400 text-sm mb-2 block">Plan</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {PLANES.map(p => (
+                    <button key={p.id} type="button" onClick={()=>setPlanForm({...planForm,plan:p.id})}
+                      className={`p-3 rounded-xl border text-center transition-all ${planForm.plan===p.id?'bg-emerald-500/10 border-emerald-500/40 text-emerald-400':'bg-zinc-800 border-zinc-700 text-zinc-500'}`}>
+                      <div className="font-semibold text-sm">{p.label}</div>
+                      <div className="text-xs opacity-70">{p.bots} bot{p.bots>1?'s':''}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-zinc-400 text-sm mb-2 block">Periodicidad</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[{id:'mensual',label:'Mensual',desc:'1 mes'},{id:'anual',label:'Anual',desc:'12 meses'}].map(p => (
+                    <button key={p.id} type="button" onClick={()=>setPlanForm({...planForm,periodicidad:p.id})}
+                      className={`p-3 rounded-xl border text-center transition-all ${planForm.periodicidad===p.id?'bg-emerald-500/10 border-emerald-500/40 text-emerald-400':'bg-zinc-800 border-zinc-700 text-zinc-500'}`}>
+                      <div className="font-semibold text-sm">{p.label}</div>
+                      <div className="text-xs opacity-70">{p.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-zinc-800 rounded-xl p-4 text-xs space-y-1">
+                <div className="text-zinc-400">Vista previa:</div>
+                <div className="text-white font-mono">
+                  {new Date().toLocaleDateString('es-CO')} → {(() => {
+                    const f = new Date(); f.setMonth(f.getMonth()+(planForm.periodicidad==='anual'?12:1))
+                    return f.toLocaleDateString('es-CO')
+                  })()}
+                </div>
+                <div className="text-emerald-400">{planForm.periodicidad==='anual'?'365 días':'30 días'}</div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={()=>setPlanModal(null)}
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-2.5 rounded-xl text-sm">Cancelar</button>
+              <button onClick={handlePlanSave} disabled={saving}
+                className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl text-sm">
+                {saving?'Guardando...':planModal.planFin?'Renovar':'Asignar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {progreso && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-white font-semibold text-lg">Configurando empresa</h3>
+                <p className="text-zinc-500 text-xs mt-0.5">{form.name}</p>
+              </div>
+              {!saving && <button onClick={()=>{setProgreso(false);setForm({name:'',numero:'',plan:'basico'})}}
+                className="text-zinc-500 hover:text-white text-2xl leading-none">×</button>}
+            </div>
+            <div className="mb-5">
+              <div className="flex justify-between text-xs mb-1.5">
+                <span className={hayError?'text-red-400':porcentaje===100?'text-emerald-400':'text-zinc-400'}>
+                  {hayError?'Error':porcentaje===100?'¡Completado!':'En progreso...'}
+                </span>
+                <span className="text-zinc-400">{porcentaje}%</span>
+              </div>
+              <div className="w-full bg-zinc-800 rounded-full h-2">
+                <div className={`h-2 rounded-full transition-all duration-500 ${hayError?'bg-red-500':'bg-emerald-500'}`}
+                  style={{width:`${porcentaje}%`}} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              {pasos.map(paso => (
+                <div key={paso.id} className={`flex items-start gap-3 px-3 py-2.5 rounded-xl border transition-all ${
+                  paso.estado==='ok'?'bg-emerald-500/5 border-emerald-500/20':
+                  paso.estado==='error'?'bg-red-500/5 border-red-500/20':
+                  paso.estado==='cargando'?'bg-zinc-800 border-zinc-700':'border-transparent'}`}>
+                  <div className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5 ${
+                    paso.estado==='ok'?'bg-emerald-500 text-white':paso.estado==='error'?'bg-red-500 text-white':
+                    paso.estado==='cargando'?'bg-zinc-600 text-white':'bg-zinc-800 text-zinc-600'}`}>
+                    {paso.estado==='ok'?'✓':paso.estado==='error'?'✗':paso.estado==='cargando'?'~':paso.id}
+                  </div>
+                  <div className="flex-1">
+                    <div className={`text-sm ${paso.estado==='ok'?'text-emerald-400':paso.estado==='error'?'text-red-400':
+                      paso.estado==='cargando'?'text-white':'text-zinc-600'}`}>{paso.label}</div>
+                    {paso.estado==='error'&&paso.error&&<div className="text-red-400 text-xs mt-1">{paso.error}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {resultado && (
+              <div className="mt-5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4">
+                <div className="text-emerald-400 font-semibold text-sm mb-3">Empresa lista</div>
+                <div className="space-y-1.5 text-xs font-mono">
+                  <div className="flex justify-between"><span className="text-zinc-500">Email:</span><span className="text-white">{resultado.email}</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-500">Contraseña:</span><span className="text-emerald-300 font-bold">{resultado.password}</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-500">Plan:</span><span className="text-white">{resultado.plan}</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-500">Bots:</span><span className="text-white">{resultado.bots?.join(', ')}</span></div>
+                </div>
+                <p className="text-zinc-500 text-xs mt-3">Guarda la contraseña.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
