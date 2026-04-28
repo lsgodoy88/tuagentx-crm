@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@sentry/nextjs": "^10.50.0",
     "@types/sharp": "^0.31.1",
     "bcryptjs": "^3.0.3",
     "driver.js": "^1.4.0",

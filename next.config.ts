@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   experimental: {
@@ -18,4 +19,10 @@ const nextConfig: NextConfig = {
     ]
   },
 }
-export default nextConfig
+export default withSentryConfig(nextConfig, {
+  org: "tuagentx",
+  project: "crm",
+  silent: true,
+  widenClientFileUpload: true,
+  sourcemaps: { disable: true },
+})
