@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { rateLimit, rateLimitHeaders } from '@/lib/ratelimit'
 import Anthropic from '@anthropic-ai/sdk'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -21,6 +22,11 @@ function checkRate(ip: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  const rl = await rateLimit(req, 'ia')
+  if (!rl.ok) return NextResponse.json(
+    { error: 'Demasiadas solicitudes — intenta en un momento' },
+    { status: 429, headers: rateLimitHeaders(rl) }
+  )
   const ip = getIP(req)
   if (!checkRate(ip)) {
     return NextResponse.json({ error: 'Demasiadas solicitudes.' }, { status: 429 })
