@@ -10,13 +10,17 @@ let ADMIN_NUM = null
 
 async function cargarAdminNum() {
   try {
+    // Buscar admin con telefono configurado (puede haber varios admins, pero uno solo con telefono)
     const admin = await prisma.panelUser.findFirst({
-      where: { role: 'admin' },
+      where: {
+        role: 'admin',
+        empresaConfig: { telefono: { not: null } }
+      },
       include: { empresaConfig: true }
     })
     if (admin && admin.empresaConfig && admin.empresaConfig.telefono) {
       ADMIN_NUM = admin.empresaConfig.telefono.replace(/\D/g, '')
-      console.log('Notificaciones ->', ADMIN_NUM)
+      console.log('Notificaciones ->', ADMIN_NUM, '(' + admin.email + ')')
     } else {
       console.log('Sin telefono en EmpresaConfig del admin')
     }
@@ -43,6 +47,22 @@ async function autoRecuperar(nombre) {
     if (nombre === 'Panel Next.js') {
       execSync('pm2 restart panel', { timeout: 15000 })
       return 'pm2 restart panel ejecutado'
+    }
+    if (nombre === 'Gestor Next.js') {
+      execSync('pm2 restart gestor', { timeout: 15000 })
+      return 'pm2 restart gestor ejecutado'
+    }
+    if (nombre === 'Master Next.js') {
+      execSync('pm2 restart master', { timeout: 15000 })
+      return 'pm2 restart master ejecutado'
+    }
+    if (nombre === 'Worker BullMQ') {
+      execSync('pm2 restart gestor-worker', { timeout: 15000 })
+      return 'pm2 restart gestor-worker ejecutado'
+    }
+    if (nombre === 'Redis') {
+      execSync('cd /srv/whatsapp-stack && docker compose restart redis', { timeout: 30000 })
+      return 'docker restart redis ejecutado'
     }
     if (nombre === 'Bot WhatsApp') {
       execSync('cd /srv/whatsapp-stack && docker compose restart bot', { timeout: 30000 })
@@ -115,6 +135,36 @@ async function run() {
   await checkServicio('Panel Next.js', async () => {
     const r = await fetch('http://localhost:3000/api/auth/providers')
     if (!r.ok) throw new Error('HTTP ' + r.status)
+  })
+  await checkServicio('Gestor Next.js', async () => {
+    const r = await fetch('http://localhost:3010/api/health')
+    if (!r.ok) throw new Error('HTTP ' + r.status)
+    const d = await r.json()
+    if (!d.healthy) throw new Error('Health check fallo: ' + JSON.stringify(d.checks))
+  })
+  await checkServicio('Master Next.js', async () => {
+    const r = await fetch('http://localhost:3020/')
+    if (!r.ok && r.status !== 401) throw new Error('HTTP ' + r.status)
+  })
+  await checkServicio('Worker BullMQ', async () => {
+    // Verificar via PM2 que el proceso esté online
+    const out = execSync('pm2 jlist', { timeout: 5000 }).toString()
+    const procs = JSON.parse(out)
+    const worker = procs.find(p => p.name === 'gestor-worker')
+    if (!worker) throw new Error('Worker no encontrado en PM2')
+    if (worker.pm2_env.status !== 'online') throw new Error('Estado: ' + worker.pm2_env.status)
+  })
+  await checkServicio('Redis', async () => {
+    const out = execSync('docker exec redis redis-cli ping', { timeout: 5000 }).toString().trim()
+    if (out !== 'PONG') throw new Error('No PONG: ' + out)
+  })
+  await checkServicio('Cron 5am UpTres', async () => {
+    // Verificar que el último sync no tiene más de 26 horas
+    const r = await fetch('http://localhost:3010/api/health')
+    const d = await r.json()
+    if (d.checks?.lastSync && !d.checks.lastSync.ok) {
+      throw new Error('Ultimo sync hace ' + d.checks.lastSync.hours + 'h (max 26h)')
+    }
   })
     await checkServicio('Landing page', async () => {
     const r = await fetch('https://tuagentx.com')
