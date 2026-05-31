@@ -350,6 +350,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           )
         })()}
+        {sinTelefono && user?.role !== 'admin' && (
+          <div className="bg-amber-900/60 border-b border-amber-700/60 flex items-center justify-between px-4 h-10 flex-shrink-0 overflow-hidden">
+            <span className="text-amber-100 text-sm truncate">📞 Configura el teléfono de tu empresa para recibir alertas del sistema</span>
+            <a href="/dashboard/configuracion"
+              className="ml-4 flex-shrink-0 bg-amber-700/60 hover:bg-amber-600/80 text-amber-100 text-xs font-semibold px-3 py-1 rounded-lg transition-colors whitespace-nowrap">
+              Configurar →
+            </a>
+          </div>
+        )}
         <div className={`flex-1 overflow-x-auto overflow-y-auto p-4 md:p-6 pb-32 md:pb-6${bloqueado ? ' pointer-events-none opacity-50' : ''}`}>
           <div className="max-w-screen-xl mx-auto w-full space-y-6">
             {children}

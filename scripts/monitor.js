@@ -22,7 +22,7 @@ async function cargarAdminNum() {
       ADMIN_NUM = admin.empresaConfig.telefono.replace(/\D/g, '')
       console.log('Notificaciones ->', ADMIN_NUM, '(' + admin.email + ')')
     } else {
-      console.log('Sin telefono en EmpresaConfig del admin')
+      // Sin telefono — se notifica via banner en el dashboard, no en logs
     }
   } catch(e) {
     console.log('Error cargando admin:', e.message)
