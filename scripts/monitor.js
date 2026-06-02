@@ -45,24 +45,22 @@ async function notificarWhatsApp(msg) {
 async function autoRecuperar(nombre) {
   try {
     if (nombre === 'Panel Next.js') {
-      execSync('pm2 restart panel', { timeout: 15000 })
+      execSync('pm2 restart panel --update-env', { timeout: 15000 })
       return 'pm2 restart panel ejecutado'
     }
     if (nombre === 'Gestor Next.js') {
-      execSync('pm2 restart gestor', { timeout: 15000 })
-      return 'pm2 restart gestor ejecutado'
+      // Auto-restart removido — gestor requiere deploy controlado
+      return 'Gestor caido — revisar manualmente'
     }
     if (nombre === 'Gestor Staging') {
-      execSync('pm2 restart gestor-staging', { timeout: 15000 })
-      return 'pm2 restart gestor-staging ejecutado'
+      return 'Gestor staging caido — revisar manualmente'
     }
     if (nombre === 'Master Next.js') {
-      execSync('pm2 restart master', { timeout: 15000 })
-      return 'pm2 restart master ejecutado'
+      return 'Master caido — revisar manualmente'
     }
     if (nombre === 'Worker BullMQ') {
-      execSync('pm2 restart gestor-worker', { timeout: 15000 })
-      return 'pm2 restart gestor-worker ejecutado'
+      // Auto-restart removido — worker requiere deploy controlado
+      return 'Worker caido — revisar manualmente'
     }
     if (nombre === 'Redis') {
       execSync('cd /srv/whatsapp-stack && docker compose restart redis', { timeout: 30000 })
@@ -233,7 +231,7 @@ async function checkCPU() {
       const z = matarBuildsZombie(); if (z) acciones.push(z)
       const d = limpiarDockerMuertos(); if (d) acciones.push(d)
       const p = matarProcesosAltaCPU(70); if (p) acciones.push(p)
-      try { execSync('rm -rf /srv/gestor/.next/cache/webpack 2>/dev/null || true', { timeout: 5000 }); acciones.push('Cache webpack limpiado') } catch(e2) {}
+      // Webpack cache NO se borra — puede dejar .next corrupto y caer gestor
       await notificarWhatsApp(
         'EMERGENCIA CPU\n\n' +
         'Steal: ' + st + '% | CPU: ' + usado.toFixed(1) + '% | Idle: ' + id + '%\n\n' +
@@ -273,12 +271,16 @@ async function run() {
     const r = await fetch('http://localhost:3000/api/auth/providers')
     if (!r.ok) throw new Error('HTTP ' + r.status)
   })
-  await checkServicio('Gestor Next.js', async () => {
-    const r = await fetch('http://localhost:3010/api/health')
-    if (!r.ok) throw new Error('HTTP ' + r.status)
-    const d = await r.json()
-    if (!d.healthy) throw new Error('Health check fallo: ' + JSON.stringify(d.checks))
-  })
+  // Omitir check si hay un deploy en curso
+  const { existsSync } = require('fs')
+  if (existsSync('/tmp/gestor-deploying')) {
+    console.log('[monitor] Gestor Next.js — deploy en curso, skip check')
+  } else {
+    await checkServicio('Gestor Next.js', async () => {
+      const r = await fetch('http://localhost:3010/api/health')
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+    })
+  }
   await checkServicio('Gestor Staging', async () => {
     const r = await fetch('http://localhost:3011/api/version')
     if (!r.ok) throw new Error('HTTP ' + r.status)

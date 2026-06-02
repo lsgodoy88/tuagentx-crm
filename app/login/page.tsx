@@ -59,7 +59,7 @@ export default function LoginPage() {
               <div>
                 <label className="text-sm mb-1.5 block" style={{color:'#9ca3af'}}>Email</label>
                 <input
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   className="w-full rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:outline-none transition-colors"
