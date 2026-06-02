@@ -132,13 +132,28 @@ let cpuEstado = null  // null | 'warn' | 'crit' | 'extreme'
 
 function matarBuildsZombie() {
   try {
-    // pkill -f mata directamente sin necesidad de parsear PIDs
-    execSync("pkill -9 -f 'next build' 2>/dev/null || true", { timeout: 3000 })
-    // Verificar si quedaron
-    const quedaron = execSync("pgrep -c -f 'next build' || echo 0", { timeout: 3000 }).toString().trim()
-    if (quedaron === '0') {
-      console.log('[CPU] Builds zombie eliminados')
-      return 'Builds zombie eliminados'
+    // No matar si hay un deploy en curso — el build es legítimo
+    const { existsSync } = require('fs')
+    if (existsSync('/tmp/gestor-deploying')) {
+      console.log('[CPU] Deploy en curso — builds protegidos, no se matan')
+      return 'Deploy en curso — builds protegidos'
+    }
+    // Solo matar builds que lleven más de 15 minutos (zombie real)
+    const viejos = execSync("ps aux | grep 'next build' | grep -v grep | awk '{print $1"|"$2"|"$10}' 2>/dev/null || echo ''", { timeout: 3000 }).toString().trim()
+    if (!viejos) return null
+    let matados = 0
+    for (const line of viejos.split('\n')) {
+      const parts = line.split('|')
+      if (parts.length < 3) continue
+      const tiempo = parts[2] // formato MM:SS o HH:MM
+      const minutos = tiempo.includes(':') ? (parseInt(tiempo.split(':')[0]) || 0) : 0
+      if (minutos < 15) continue // build reciente — no tocar
+      execSync('kill -9 ' + parts[1].trim() + ' 2>/dev/null || true', { timeout: 2000 })
+      matados++
+    }
+    if (matados > 0) {
+      console.log('[CPU] Builds zombie (+15min) eliminados:', matados)
+      return matados + ' build(s) zombie eliminado(s)'
     }
     return null
   } catch(e) { return null }
