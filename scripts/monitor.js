@@ -169,7 +169,7 @@ function limpiarDockerMuertos() {
 
 function matarProcesosAltaCPU(threshold = 70) {
   // Mata procesos con >threshold% CPU que no sean servicios críticos
-  const SAFE = ['pm2', '.pm2', 'next-server', 'postgres', 'redis', 'dockerd', 'containerd', 'monitor', 'sysstat', 'sar', 'vmstat', 'ps ']
+  const SAFE = ['pm2', '.pm2', 'next-server', 'next', 'node', 'postgres', 'redis', 'dockerd', 'containerd', 'monitor', 'sysstat', 'sar', 'vmstat', 'ps ', 'gestor', 'panel', 'master', 'guardian', 'mcp', 'worker', 'bullmq', 'prisma']
   try {
     const lines = execSync(
       "ps aux --sort=-%cpu | awk 'NR>1 && NR<=20 {print $2"|"$3"|"$11}'",
@@ -296,12 +296,8 @@ async function run() {
       if (!r.ok) throw new Error('HTTP ' + r.status)
     })
   }
-  await checkServicio('Gestor Staging', async () => {
-    const r = await fetch('http://localhost:3011/api/version')
-    if (!r.ok) throw new Error('HTTP ' + r.status)
-    const d = await r.json()
-    if (d.env !== 'staging') throw new Error('env inesperado: ' + d.env)
-  })
+  // Gestor Staging desactivado — no existe :3011, generaba incidentes en loop cada 5min
+  // await checkServicio('Gestor Staging', ...)
   await checkServicio('Master Next.js', async () => {
     const r = await fetch('http://localhost:3020/')
     if (!r.ok && r.status !== 401) throw new Error('HTTP ' + r.status)
